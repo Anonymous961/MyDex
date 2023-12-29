@@ -58,6 +58,7 @@ Protect your API keys and do not expose them in public repositories.
 ## Technologies Used
 - Moralis API
 - 1inch API
+- wagmi
 - React.js
 - Express.js
   
