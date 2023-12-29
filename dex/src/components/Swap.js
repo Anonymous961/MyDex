@@ -7,17 +7,37 @@ import {
 } from "@ant-design/icons";
 import tokenList from "../tokenList.json"
 import axios from "axios"
+import { useSendTransaction, useWaitForTransaction } from "wagmi";
 
-function Swap() {
+function Swap(props) {
+  const {isConnected,address}=props;
+  const [messageApi,contextHolder]=message.useMessage();
   const [slippage,setSlippage]=useState(2.5);
-  const [tokenOneAccount,setTokenOneAmount]=useState(null); 
-  const [tokenTwoAccount,setTokenTwoAmount]=useState(null); 
+  const [tokenOneAmount,setTokenOneAmount]=useState(null); 
+  const [tokenTwoAmount,setTokenTwoAmount]=useState(null); 
   const [tokenOne,setTokenOne]=useState(tokenList[0]);
   const [tokenTwo,setTokenTwo]=useState(tokenList[1]);
   const [isOpen, setIsOpen]=useState(false);
   const [changeToken,setChangeToken]=useState(1);
   const [prices, setPrices] = useState(null);
+  const [txDetails, setTxDetails]=useState({
+    to:null,
+    data:null,
+    value:null
+  })
 
+  const {data,sendTransaction}=useSendTransaction({
+    request:{
+      from:address,
+      to:String(txDetails.data),
+      value:String(txDetails.value),
+      data:String(txDetails.data),
+    }
+  })
+
+  const {isLoading, isSuccess}=useWaitForTransaction({
+    hash:data?.hash,
+  })
 
   const handleSlippageChange=(e)=>{
     // e.preventDefault();
@@ -25,7 +45,7 @@ function Swap() {
   }
 
   function changeAmount(e){
-    setTokenOneAmount(e.target.value)
+    setTokenOneAmount(e.target.value);
     if(e.target.value && prices){
       setTokenTwoAmount((e.target.value*prices.ratio).toFixed(2))
     }else{
@@ -65,14 +85,42 @@ function Swap() {
     const res = await axios.get(`http://localhost:3001/tokenPrice`,{
       params:{addressOne:one,addressTwo:two}
     })
-    console.log(res.data);
     setPrices(res.data)
+  }
+
+  async function fetchDexSwap(){
+    const allowance = await axios.get(`/swap/v5.2/1/approve/allowance?tokenAddress=${tokenOne.address}&walletAddress=${address}`)
+
+    if(allowance.data.allowance==="0"){
+      const approve = await axios.get(`/swap/v5.2/1/approve/transaction?tokenAddress=${tokenOne.address}`)
+      setTxDetails(approve.data);
+      // console.log(txDetails)
+      // console.log(approve.data);
+      console.log("not approved");
+      return
+    }
+    // console.log("make swap")
+    const tx = await axios.get(
+      `/swap/v5.2/1/swap?src=${tokenOne.address}&dst=${tokenTwo.address}&amount=${tokenOneAmount.padEnd(tokenOne.decimals+tokenOneAmount.length,'0')}&from=${address}&slippage=${slippage}`
+    )
+
+    let decimals =Number(`1E${tokenTwo.decimals}`)
+    setTokenTwoAmount((Number(tx.data.toTokenAmount)/decimals).toFixed(2));
+
+    setTxDetails(tx.data.tx);
   }
 
   useEffect(()=>{
     fetchPrices(tokenList[0].address,tokenList[1].address)
   },[])
 
+  useEffect(()=>{
+    if(txDetails.to && isConnected){
+      sendTransaction();
+    }
+  },[txDetails]);
+
+  console.log(!isConnected)
   const settings =(
     <>
       <div>
@@ -87,9 +135,46 @@ function Swap() {
       </div>
     </>
   )
+  useEffect(()=>{
+    if(txDetails.to && isConnected){
+      sendTransaction();
+    }
+  },[txDetails])
+  
+  useEffect(()=>{
+    messageApi.destroy();
+
+    if(isLoading){
+      messageApi.open({
+        type:'loading',
+        content:"Transaction is Pending...",
+        duration:0,
+      })
+    }
+  },[isLoading])
+  
+  useEffect(()=>{
+    messageApi.destroy();
+  
+    if(isSuccess){
+      messageApi.open({
+        type:'success',
+        content:"Transaction Successful",
+        duration:1.5,
+      })
+    }else if(txDetails.to){
+      messageApi.open({
+        type:'error',
+        content:"Transaction Failed",
+        duration:1.50
+      })
+    }
+
+  },[isSuccess])
 
   return (
     <>
+    {contextHolder}
     <Modal
       open={isOpen}
       footer={null}
@@ -122,8 +207,8 @@ function Swap() {
         </Popover>
       </div>
       <div className="inputs">
-        <Input placeholder="0" value={tokenOneAccount} onChange={changeAmount}/>
-        <Input placeholder="0" value={tokenTwoAccount} disabled={true}/>
+        <Input placeholder="0" value={tokenOneAmount} onChange={changeAmount}/>
+        <Input placeholder="0" value={tokenTwoAmount} disabled={true}/>
         <div className="switchButton" onClick={switchTokens}>
           <ArrowDownOutlined className="switchArrow"/>
         </div>
@@ -138,7 +223,8 @@ function Swap() {
           <DownOutlined/>
         </div>
       </div>
-      <div className="swapButton" disabled={!tokenOneAccount}>Swap</div>
+      <div className="swapButton" disabled={!tokenOneAmount || !isConnected} onClick={fetchDexSwap}>Swap</div>
+     
     </div>
     </>
   );
